@@ -211,6 +211,41 @@ def build_landmarker():
     return FaceLandmarker.create_from_options(options)
 
 
+def generate_gaze_image(points, width, height, filename):
+    import numpy as np
+    import cv2
+
+    # Create blank image
+    canvas = np.zeros((height, width, 3), dtype=np.uint8)
+
+    # Draw trajectory
+    for i in range(1, len(points)):
+        cv2.line(canvas, points[i-1], points[i], (255,255,255), 2)
+
+    # Draw gaze points
+    for p in points:
+        cv2.circle(canvas, p, 3, (0,255,0), -1)
+
+    # Create heatmap
+    heat = np.zeros((height, width), dtype=np.float32)
+
+    for p in points:
+        x, y = p
+        if 0 <= x < width and 0 <= y < height:
+            heat[y, x] += 1
+
+    heat = cv2.GaussianBlur(heat, (0,0), 25)
+
+    heat_norm = cv2.normalize(heat, None, 0, 255, cv2.NORM_MINMAX)
+    heat_norm = heat_norm.astype(np.uint8)
+
+    heatmap = cv2.applyColorMap(heat_norm, cv2.COLORMAP_JET)
+
+    # Combine trajectory + heatmap
+    overlay = cv2.addWeighted(canvas, 0.6, heatmap, 0.4, 0)
+
+    cv2.imwrite(filename, overlay)
+
 
 def main():
     cap = cv2.VideoCapture(0)
@@ -338,6 +373,9 @@ def main():
     model_x.fit(X, Y[:, 0])
     model_y.fit(X, Y[:, 1])
 
+    gaze_points = []
+    start_time = time.time()
+
     # Live tracking loop
     while True:
         ok, frame = cap.read()
@@ -376,6 +414,18 @@ def main():
             sx, sy = int(sx), int(sy)
 
             trail.append((sx, sy))
+            gaze_points.append((sx, sy))
+
+            if time.time() - start_time > 10:
+                generate_gaze_image(
+                    gaze_points,
+                    SCREEN_W,
+                    SCREEN_H,
+                    f"gaze_dataset/sample_{int(time.time())}.png"
+                )
+
+                gaze_points = []
+                start_time = time.time()
 
             if len(trail) >= 2:
                 pts = np.array(trail, dtype=np.int32).reshape((-1, 1, 2))
